@@ -1,248 +1,287 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Activity, ApiResponse } from '@/lib/types'
-import { Clock, User, MessageCircle, Move, Coffee, AlertCircle, Wifi, WifiOff } from 'lucide-react'
+import { Activity, ActivitiesResponse } from '@/lib/types'
 
 interface ActivityPanelProps {
   className?: string
+  pollingInterval?: number
 }
 
-const ACTIVITY_ICONS = {
-  movement: Move,
-  conversation: MessageCircle,
-  work: User,
-  break: Coffee
-} as const
-
-const ACTIVITY_COLORS = {
-  movement: 'text-blue-500 bg-blue-50',
-  conversation: 'text-green-500 bg-green-50',
-  work: 'text-purple-500 bg-purple-50',
-  break: 'text-orange-500 bg-orange-50'
-} as const
-
-export function ActivityPanel({ className = '' }: ActivityPanelProps) {
+const ActivityPanel: React.FC<ActivityPanelProps> = ({ 
+  className = '', 
+  pollingInterval = 5000 
+}) => {
   const [activities, setActivities] = useState<Activity[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [isOnline, setIsOnline] = useState(true)
-  const [lastUpdate, setLastUpdate] = useState<Date | null>(null)
+  const [lastUpdate, setLastUpdate] = useState<string | null>(null)
+  const [isPolling, setIsPolling] = useState(false)
 
   // Fetch activities from API
-  const fetchActivities = async () => {
+  const fetchActivities = useCallback(async () => {
     try {
       setError(null)
-      const response = await fetch('/api/activities', {
+      
+      const response = await fetch('/api/activities?limit=15', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
         },
       })
-      
+
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+        throw new Error(`HTTP error! status: ${response.status}`)
       }
-      
-      const data: ApiResponse<Activity[]> = await response.json()
-      
-      if (data.success && data.data) {
-        setActivities(data.data)
-        setIsOnline(true)
-        setLastUpdate(new Date())
-      } else {
+
+      const data: ActivitiesResponse = await response.json()
+
+      if (!data.success) {
         throw new Error(data.error || 'Failed to fetch activities')
       }
-    } catch (err) {
-      const errorMessage = err instanceof Error ? err.message : 'Unknown error occurred'
-      console.error('Failed to fetch activities:', errorMessage)
-      setError(errorMessage)
-      setIsOnline(false)
-    } finally {
+
+      setActivities(data.data || [])
+      setLastUpdate(data.timestamp)
       setLoading(false)
+      
+    } catch (err) {
+      console.error('Error fetching activities:', err)
+      setError(err instanceof Error ? err.message : 'Unknown error occurred')
+      setLoading(false)
+    }
+  }, [])
+
+  // Start polling
+  const startPolling = useCallback(() => {
+    setIsPolling(true)
+    fetchActivities() // Initial fetch
+    
+    const intervalId = setInterval(() => {
+      fetchActivities()
+    }, pollingInterval)
+
+    return () => {
+      clearInterval(intervalId)
+      setIsPolling(false)
+    }
+  }, [fetchActivities, pollingInterval])
+
+  // Initialize polling on mount
+  useEffect(() => {
+    const cleanup = startPolling()
+    return cleanup
+  }, [startPolling])
+
+  const formatTime = (timestamp: number) => {
+    const now = Date.now()
+    const diff = now - timestamp
+    const minutes = Math.floor(diff / 60000)
+    
+    if (minutes < 1) return 'Just now'
+    if (minutes < 60) return `${minutes}m ago`
+    
+    const hours = Math.floor(minutes / 60)
+    if (hours < 24) return `${hours}h ago`
+    
+    return new Date(timestamp).toLocaleDateString()
+  }
+
+  const getActivityIcon = (type: Activity['type']) => {
+    switch (type) {
+      case 'work': return '💻'
+      case 'conversation': return '💬'
+      case 'movement': return '🚶'
+      case 'break': return '☕'
+      default: return '📋'
     }
   }
 
-  // Set up polling every 5 seconds
-  useEffect(() => {
-    // Initial fetch
-    fetchActivities()
-    
-    // Set up interval
-    const interval = setInterval(fetchActivities, 5000)
-    
-    // Cleanup
-    return () => clearInterval(interval)
-  }, [])
-
-  // Format timestamp
-  const formatTime = (timestamp: number) => {
-    const date = new Date(timestamp)
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false
-    })
+  const getActivityColor = (type: Activity['type']) => {
+    switch (type) {
+      case 'work': return 'border-l-green-400 bg-green-50 hover:bg-green-100'
+      case 'conversation': return 'border-l-blue-400 bg-blue-50 hover:bg-blue-100'
+      case 'movement': return 'border-l-purple-400 bg-purple-50 hover:bg-purple-100'
+      case 'break': return 'border-l-orange-400 bg-orange-50 hover:bg-orange-100'
+      default: return 'border-l-gray-400 bg-gray-50 hover:bg-gray-100'
+    }
   }
 
-  // Format relative time
-  const formatRelativeTime = (timestamp: number) => {
-    const now = Date.now()
-    const diff = now - timestamp
-    const seconds = Math.floor(diff / 1000)
-    const minutes = Math.floor(seconds / 60)
-    const hours = Math.floor(minutes / 60)
-    
-    if (seconds < 60) return `${seconds}s ago`
-    if (minutes < 60) return `${minutes}m ago`
-    return `${hours}h ago`
+  const getTypeColor = (type: Activity['type']) => {
+    switch (type) {
+      case 'work': return 'text-green-600 bg-green-100'
+      case 'conversation': return 'text-blue-600 bg-blue-100'
+      case 'movement': return 'text-purple-600 bg-purple-100'
+      case 'break': return 'text-orange-600 bg-orange-100'
+      default: return 'text-gray-600 bg-gray-100'
+    }
+  }
+
+  if (loading && activities.length === 0) {
+    return (
+      <div className={`bg-white rounded-xl shadow-lg border border-gray-200 ${className}`}>
+        <div className="p-6">
+          <div className="animate-pulse">
+            <div className="h-6 bg-gray-200 rounded mb-4 w-3/4"></div>
+            <div className="space-y-3">
+              {[...Array(6)].map((_, i) => (
+                <div key={i} className="flex items-start gap-3">
+                  <div className="w-8 h-8 bg-gray-200 rounded-full"></div>
+                  <div className="flex-1">
+                    <div className="h-4 bg-gray-200 rounded mb-2 w-3/4"></div>
+                    <div className="h-3 bg-gray-200 rounded w-1/2"></div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
-    <div className={`bg-white rounded-xl shadow-lg border border-gray-200 ${className}`}>
+    <div className={`bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden ${className}`}>
       {/* Header */}
-      <div className="flex items-center justify-between p-4 border-b border-gray-100">
-        <div className="flex items-center gap-2">
-          <div className="p-2 bg-blue-50 rounded-lg">
-            <Clock className="w-4 h-4 text-blue-600" />
-          </div>
+      <div className="p-6 border-b border-gray-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+        <div className="flex items-center justify-between">
           <div>
-            <h3 className="font-semibold text-gray-900">Activity Feed</h3>
-            <p className="text-xs text-gray-500">
-              {lastUpdate ? `Updated ${formatRelativeTime(lastUpdate.getTime())}` : 'Loading...'}
+            <h2 className="text-xl font-bold text-gray-900 flex items-center gap-3">
+              <span className="text-2xl">📈</span>
+              Activity Feed
+            </h2>
+            <p className="text-sm text-gray-600 mt-1">
+              Real-time updates from all AI agents
             </p>
           </div>
-        </div>
-        
-        {/* Connection Status */}
-        <div className="flex items-center gap-2">
-          {isOnline ? (
-            <div className="flex items-center gap-1 text-green-600">
-              <Wifi className="w-4 h-4" />
-              <span className="text-xs font-medium">Live</span>
-            </div>
-          ) : (
-            <div className="flex items-center gap-1 text-red-600">
-              <WifiOff className="w-4 h-4" />
-              <span className="text-xs font-medium">Offline</span>
-            </div>
-          )}
+          
+          <div className="flex items-center gap-3">
+            {error ? (
+              <div className="flex items-center gap-2 text-red-600">
+                <span className="text-sm">❌</span>
+                <span className="text-xs">Error</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2 text-green-600">
+                <motion.div 
+                  className="w-2 h-2 rounded-full bg-green-500"
+                  animate={{ scale: [1, 1.2, 1] }}
+                  transition={{ repeat: Infinity, duration: 2 }}
+                />
+                <span className="text-xs font-medium">Live</span>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Content */}
-      <div className="h-96 overflow-y-auto">
-        {loading && activities.length === 0 ? (
-          /* Loading State */
-          <div className="flex flex-col items-center justify-center h-full text-gray-500">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mb-3"></div>
-            <p className="text-sm">Loading activities...</p>
-          </div>
-        ) : error && activities.length === 0 ? (
-          /* Error State */
-          <div className="flex flex-col items-center justify-center h-full text-red-500 p-4">
-            <AlertCircle className="w-8 h-8 mb-3" />
-            <p className="text-sm text-center mb-3">Failed to load activities</p>
-            <p className="text-xs text-gray-500 text-center mb-4">{error}</p>
-            <button
-              onClick={fetchActivities}
-              className="px-3 py-1 bg-red-100 text-red-700 rounded text-xs hover:bg-red-200 transition-colors"
-            >
-              Retry
-            </button>
-          </div>
-        ) : activities.length === 0 ? (
-          /* Empty State */
-          <div className="flex flex-col items-center justify-center h-full text-gray-500 p-4">
-            <Clock className="w-8 h-8 mb-3" />
-            <p className="text-sm">No activities yet</p>
-            <p className="text-xs text-center">Agent activities will appear here as they happen</p>
-          </div>
-        ) : (
-          /* Activity List */
-          <div className="p-4 space-y-3">
-            <AnimatePresence mode="popLayout">
-              {activities
-                .sort((a, b) => b.timestamp - a.timestamp) // Most recent first
-                .slice(0, 50) // Limit to 50 recent activities
-                .map((activity, index) => {
-                  const IconComponent = ACTIVITY_ICONS[activity.type] || User
-                  const colorClass = ACTIVITY_COLORS[activity.type] || 'text-gray-500 bg-gray-50'
-                  
-                  return (
+      {/* Error State */}
+      {error && (
+        <div className="p-6 text-center">
+          <div className="text-4xl mb-3">⚠️</div>
+          <h3 className="font-semibold text-gray-900 mb-2">Connection Error</h3>
+          <p className="text-sm text-gray-600 mb-4">{error}</p>
+          <button
+            onClick={() => fetchActivities()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+
+      {/* Activities List */}
+      {!error && (
+        <>
+          <div className="h-96 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-300 scrollbar-track-gray-100">
+            {activities.length === 0 ? (
+              <div className="p-8 text-center text-gray-500">
+                <div className="text-4xl mb-3">😴</div>
+                <h3 className="font-medium text-gray-700 mb-2">All Quiet</h3>
+                <p className="text-sm">No recent activity from the team</p>
+              </div>
+            ) : (
+              <div className="p-4 space-y-3">
+                <AnimatePresence>
+                  {activities.map((activity, index) => (
                     <motion.div
-                      key={`${activity.id}-${activity.timestamp}`}
-                      initial={{ opacity: 0, y: -20, scale: 0.95 }}
-                      animate={{ opacity: 1, y: 0, scale: 1 }}
-                      exit={{ opacity: 0, y: 20, scale: 0.95 }}
-                      transition={{ 
-                        duration: 0.3, 
-                        delay: index * 0.05,
-                        ease: "easeOut"
-                      }}
-                      layout
-                      className="bg-gray-50 rounded-lg p-3 border border-gray-100 hover:bg-gray-100 transition-colors"
+                      key={activity.id}
+                      initial={{ opacity: 0, y: -20 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -20 }}
+                      transition={{ delay: index * 0.05 }}
+                      className={`p-4 rounded-lg border-l-4 transition-all duration-200 cursor-pointer ${getActivityColor(activity.type)}`}
                     >
                       <div className="flex items-start gap-3">
-                        {/* Icon */}
-                        <div className={`p-1.5 rounded-md ${colorClass} flex-shrink-0`}>
-                          <IconComponent className="w-3 h-3" />
+                        <div className="text-2xl flex-shrink-0 mt-1">
+                          {getActivityIcon(activity.type)}
                         </div>
                         
-                        {/* Content */}
                         <div className="flex-1 min-w-0">
-                          <div className="flex items-center justify-between mb-1">
-                            <span className="text-xs font-medium text-gray-900 truncate">
-                              {activity.agentId}
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className={`text-xs px-2 py-1 rounded-full font-medium ${getTypeColor(activity.type)}`}>
+                              {activity.type.charAt(0).toUpperCase() + activity.type.slice(1)}
                             </span>
-                            <span className="text-xs text-gray-500 flex-shrink-0">
+                            <span className="text-xs text-gray-500">
                               {formatTime(activity.timestamp)}
                             </span>
                           </div>
                           
-                          <p className="text-xs text-gray-600 break-words">
+                          <p className="text-sm text-gray-800 font-medium mb-1">
                             {activity.description}
                           </p>
                           
-                          {/* Additional Info */}
-                          <div className="flex items-center gap-2 mt-1">
-                            <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium capitalize ${colorClass}`}>
-                              {activity.type}
-                            </span>
-                            
-                            {activity.duration && (
-                              <span className="text-xs text-gray-400">
-                                {activity.duration}s
+                          {activity.participants && activity.participants.length > 1 && (
+                            <div className="flex items-center gap-1 mt-2">
+                              <span className="text-xs text-gray-500">with:</span>
+                              <div className="flex gap-1">
+                                {activity.participants.slice(1).map((participant, idx) => (
+                                  <span key={idx} className="text-xs bg-gray-100 px-2 py-1 rounded-full text-gray-700">
+                                    {participant}
+                                  </span>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                          
+                          {activity.duration && (
+                            <div className="flex items-center gap-1 mt-2">
+                              <span className="text-xs text-gray-500">Duration:</span>
+                              <span className="text-xs bg-gray-100 px-2 py-1 rounded-full text-gray-700">
+                                {Math.floor(activity.duration / 60)}m {activity.duration % 60}s
                               </span>
-                            )}
-                            
-                            {activity.participants && activity.participants.length > 0 && (
-                              <span className="text-xs text-gray-400">
-                                +{activity.participants.length} others
-                              </span>
-                            )}
-                          </div>
+                            </div>
+                          )}
                         </div>
                       </div>
                     </motion.div>
-                  )
-                })}
-            </AnimatePresence>
+                  ))}
+                </AnimatePresence>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-      
-      {/* Footer */}
-      {activities.length > 0 && (
-        <div className="px-4 py-3 border-t border-gray-100 bg-gray-50 rounded-b-xl">
-          <div className="flex items-center justify-between text-xs text-gray-500">
-            <span>Showing {Math.min(activities.length, 50)} activities</span>
-            <span>Updates every 5 seconds</span>
+
+          {/* Footer */}
+          <div className="p-4 border-t border-gray-200 bg-gray-50">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-gray-600">
+                {activities.length} recent activities
+              </span>
+              
+              <div className="flex items-center gap-4 text-xs text-gray-500">
+                {lastUpdate && (
+                  <span>
+                    Updated: {new Date(lastUpdate).toLocaleTimeString()}
+                  </span>
+                )}
+                <span>Polling every {pollingInterval / 1000}s</span>
+              </div>
+            </div>
           </div>
-        </div>
+        </>
       )}
     </div>
   )
 }
+
+export default ActivityPanel
