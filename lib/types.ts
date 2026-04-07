@@ -20,6 +20,8 @@ export interface Agent {
   conversationPartner?: string
   lastActivity: string
   status: 'working' | 'meeting' | 'break' | 'idle'
+  currentTask?: string | null
+  avatarColor?: string
 }
 
 export interface OfficeZone {
@@ -57,3 +59,15 @@ export interface OfficeMapProps {
   showActivities?: boolean
   realTime?: boolean
 }
+
+// API Response types
+export interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+  timestamp: string
+  count?: number
+}
+
+export interface AgentsResponse extends ApiResponse<Agent[]> {}
+export interface ActivitiesResponse extends ApiResponse<Activity[]> {}
