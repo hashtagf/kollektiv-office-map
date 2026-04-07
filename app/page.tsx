@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, Suspense } from 'react'
-import { motion } from 'framer-motion'
+import { motion, AnimatePresence } from 'framer-motion'
 import { OfficeLayout } from '@/components/OfficeLayout'
 import { RealTimeAgentManager } from '@/components/RealTimeAgentManager'
 import { ActivityPanel } from '@/components/ActivityPanel'
